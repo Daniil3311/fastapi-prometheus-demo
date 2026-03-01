@@ -1,0 +1,89 @@
+﻿version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: fastapi-app
+    environment:
+      DATABASE_URL: postgresql+psycopg2://app:app@postgres:5432/app
+      LOG_FILE: /var/log/app/app.log
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - app-logs:/var/log/app
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: promtail
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - app-logs:/var/log/app:ro
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  pg-data:
+  app-logs:
